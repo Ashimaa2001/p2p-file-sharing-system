@@ -8,7 +8,7 @@ using namespace std;
 
 class fileInfo {
 public:
-    string file_name;           
+    string file_name;
     long long int no_of_chunks;
     long long int size;
     string sha;
@@ -27,12 +27,11 @@ struct PairHash {
 
 class User {
 public:
-    string user_id;            
+    string user_id;
     string password;
     string ip_address;
     string port;
     bool is_active = false;
-
     unordered_map<pair<string, string>, string, PairHash> files;
 };
 
@@ -43,7 +42,7 @@ public:
     string group_id;
     string owner_user_id;
     unordered_map<string, int> pending_users;
-    unordered_map<string, int> accepted_users; 
+    unordered_map<string, int> accepted_users;
 };
 
 unordered_map<string, Group> groups;
@@ -53,7 +52,6 @@ void *handleClient(void *socket_desc) {
     delete (int *)socket_desc;
 
     char buffer[1024] = {0};
-
     int bytes_received = recv(client_sock, buffer, sizeof(buffer), 0);
     if (bytes_received > 0) {
         cout << "[Tracker] Received: " << buffer << endl;
