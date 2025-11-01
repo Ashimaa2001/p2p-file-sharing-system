@@ -179,16 +179,60 @@ void handleTrackerCommands(int tracker_sock) {
     cout << "7. list_files <group_id>\n";
     cout << "8. list_requests <group_id>\n";
     cout << "9. accept_request <group_id> <user_id>\n";
-    cout << "10. logout <user_id>\n";
+    cout << "10. upload_file <file_path> <group_id>\n";  
+    cout << "11. logout <user_id>\n";
     cout << "Type 'exit' to quit.\n\n";
 
     string cmd;
     char buffer[4096];
+
     while (true) {
         cout << "> ";
         getline(cin, cmd);
+
         if (cmd == "exit")
             break;
+
+        if (cmd.find("upload_file") == 0) {
+            stringstream ss(cmd);
+            string command, file_path, group_id;
+            ss >> command >> file_path >> group_id;
+
+            if (file_path.empty() || group_id.empty()) {
+                cout << "Usage: upload_file <file_path> <group_id>" << endl;
+                continue;
+            }
+
+            // 1. Calculate file metadata: file name, SHA, number of chunks, file size
+            string file_name = file_path.substr(file_path.find_last_of("/") + 1); 
+            long long int file_size = 0;
+            string sha = "exampleSHA";  // TODO: calculate using a hashing function
+            long long int no_of_chunks = 0;
+
+            // Example: Get file size
+            ifstream file(file_path, ios::binary | ios::ate);
+            if (file.is_open()) {
+                file_size = file.tellg();
+                no_of_chunks = (file_size / 1024) + (file_size % 1024 != 0);  // Assuming 1KB chunks
+            }
+            file.close();
+
+            // 2. Prepare the full command with metadata
+            string full_cmd = "upload_file " + file_path + " " + group_id + " " 
+                              + file_name + " " + sha + " " + to_string(no_of_chunks) + " " + to_string(file_size);
+
+            // 3. Send the command to the tracker
+            send(tracker_sock, full_cmd.c_str(), full_cmd.size(), 0);
+
+            memset(buffer, 0, sizeof(buffer));
+            int bytes_received = recv(tracker_sock, buffer, sizeof(buffer), 0);
+            if (bytes_received > 0)
+                cout << "[Tracker Response]: " << buffer << endl;
+            else
+                cout << "[Error] No response from tracker.\n";
+
+            continue;
+        }
 
         send(tracker_sock, cmd.c_str(), cmd.size(), 0);
 

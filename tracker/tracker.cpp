@@ -153,23 +153,23 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
     }
 
     else if (cmd == "list_requests") {
-    if (args.size() < 2) return "Usage: list_requests <group_id>";
-    string group_id = args[1];
+        if (args.size() < 2) return "Usage: list_requests <group_id>";
+        string group_id = args[1];
 
-    if (!groups.count(group_id)) return "Group not found";
+        if (!groups.count(group_id)) return "Group not found";
 
-    if (groups[group_id].owner_user_id != current_user_id)
-        return "Only group owner can view pending requests";
+        if (groups[group_id].owner_user_id != current_user_id)
+            return "Only group owner can view pending requests";
 
-    if (groups[group_id].pending_users.empty()) return "No pending requests";
+        if (groups[group_id].pending_users.empty()) return "No pending requests";
 
-    string res;
-    for (auto &p : groups[group_id].pending_users) {
-        res += p.first + "\n";  
+        string res;
+        for (auto &p : groups[group_id].pending_users) {
+            res += p.first + "\n";  
+        }
+
+        return res;
     }
-
-    return res;
-}
 
    else if (cmd == "accept_request") {
         if (args.size() < 3) return "Usage: accept_request <group_id> <username>";
@@ -190,6 +190,44 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
 
         return "User added to group successfully";
     }
+
+    else if (cmd == "upload_file") {
+        if (args.size() < 6) return "Usage: upload_file <file_path> <group_id> <file_name> <sha> <no_of_chunks> <file_size>";
+
+        string file_path = args[1];
+        string group_id = args[2];
+        string file_name = args[3];
+        string sha = args[4];
+        long long int no_of_chunks = stoll(args[5]); 
+        long long int file_size = stoll(args[6]);   
+
+        string current_user_id = "";
+        for (auto &u : users) {
+            if (u.second.ip_address == client_ip && u.second.port == client_port) {
+                current_user_id = u.first;
+                break;
+            }
+        }
+
+        if (!groups.count(group_id)) return "Group not found";
+
+        if (current_user_id.empty()) return "You must login first";
+        if (groups[group_id].accepted_users.count(current_user_id) == 0) {
+            return "User must be a member of the group to upload a file.";
+        }
+
+        users[current_user_id].files[{group_id, file_name}] = sha;
+
+        fileInfo f;
+        f.file_name = file_name;
+        f.sha = sha;
+        f.no_of_chunks = no_of_chunks;
+        f.size = file_size;
+        groups[group_id].files[file_name] = f;
+
+        return "File uploaded successfully.";
+    }
+
 
 
     else if (cmd == "logout") {
