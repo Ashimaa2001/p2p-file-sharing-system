@@ -47,15 +47,104 @@ public:
 
 unordered_map<string, Group> groups;
 
+vector<string> tokenize(const string &s) {
+    vector<string> tokens;
+    stringstream ss(s);
+    string temp;
+    while (ss >> temp)
+        tokens.push_back(temp);
+    return tokens;
+}
+
+string handleCommand(const string &cmdline, const string &client_ip, const string &client_port) {
+    vector<string> args = tokenize(cmdline);
+    if (args.empty()) return "Invalid command";
+
+    string cmd = args[0];
+
+    if (cmd == "create_user") {
+        if (args.size() < 3) return "Usage: create_user <user_id> <password>";
+        string user_id = args[1], password = args[2];
+        if (users.count(user_id)) return "User already exists";
+        User u;
+        u.user_id = user_id;
+        u.password = password;
+        u.ip_address = client_ip;
+        u.port = client_port;
+        users[user_id] = u;
+        return "User created successfully";
+    }
+
+    else if (cmd == "login") {
+        if (args.size() < 3) return "Usage: login <user_id> <password>";
+        string user_id = args[1], password = args[2];
+        if (!users.count(user_id)) return "User not found";
+        if (users[user_id].password != password) return "Invalid password";
+        users[user_id].is_active = true;
+        return "Login successful";
+    }
+
+    else if (cmd == "create_group") {
+        if (args.size() < 2) return "Usage: create_group <group_id>";
+        string group_id = args[1];
+        if (groups.count(group_id)) return "Group already exists";
+        Group g;
+        g.group_id = group_id;
+        g.owner_user_id = client_ip + ":" + client_port;
+        g.accepted_users[g.owner_user_id] = 1;
+        groups[group_id] = g;
+        return "Group created successfully";
+    }
+
+    else if (cmd == "join_group") {
+        if (args.size() < 2) return "Usage: join_group <group_id>";
+        string group_id = args[1];
+        if (!groups.count(group_id)) return "Group not found";
+        string uid = client_ip + ":" + client_port;
+        if (groups[group_id].accepted_users.count(uid)) return "Already a member";
+        groups[group_id].pending_users[uid] = 1;
+        return "Join request sent to admin";
+    }
+
+    else if (cmd == "leave_group") {
+        if (args.size() < 2) return "Usage: leave_group <group_id>";
+        string group_id = args[1];
+        string uid = client_ip + ":" + client_port;
+        if (!groups.count(group_id)) return "Group not found";
+        if (!groups[group_id].accepted_users.count(uid)) return "You are not a member";
+        groups[group_id].accepted_users.erase(uid);
+        return "Left group successfully";
+    }
+
+    else if (cmd == "list_groups") {
+        if (groups.empty()) return "No groups available";
+        string res;
+        for (auto &it : groups) res += it.first + "\n";
+        return res;
+    }
+
+    return "Unknown command";
+}
+
 void *handleClient(void *socket_desc) {
     int client_sock = *(int *)socket_desc;
     delete (int *)socket_desc;
 
     char buffer[1024] = {0};
-    int bytes_received = recv(client_sock, buffer, sizeof(buffer), 0);
-    if (bytes_received > 0) {
-        cout << "[Tracker] Received: " << buffer << endl;
-        string response = "ACK from Tracker";
+    struct sockaddr_in addr;
+    socklen_t addr_size = sizeof(addr);
+    getpeername(client_sock, (struct sockaddr *)&addr, &addr_size);
+    string client_ip = inet_ntoa(addr.sin_addr);
+    string client_port = to_string(ntohs(addr.sin_port));
+
+    while (true) {
+        memset(buffer, 0, sizeof(buffer));
+        int bytes_received = recv(client_sock, buffer, sizeof(buffer), 0);
+        if (bytes_received <= 0) break;
+
+        string command(buffer);
+        cout << "[Tracker] Received: " << command << endl;
+        string response = handleCommand(command, client_ip, client_port);
         send(client_sock, response.c_str(), response.size(), 0);
     }
 

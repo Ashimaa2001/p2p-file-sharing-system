@@ -168,6 +168,35 @@ int connectToTracker(const string &tracker_info_file) {
     return sock;
 }
 
+void handleTrackerCommands(int tracker_sock) {
+    cout << "\nAvailable Commands:\n";
+    cout << "1. create_user <user_id> <password>\n";
+    cout << "2. login <user_id> <password>\n";
+    cout << "3. create_group <group_id>\n";
+    cout << "4. join_group <group_id>\n";
+    cout << "5. leave_group <group_id>\n";
+    cout << "6. list_groups\n";
+    cout << "Type 'exit' to quit.\n\n";
+
+    string cmd;
+    char buffer[4096];
+    while (true) {
+        cout << "> ";
+        getline(cin, cmd);
+        if (cmd == "exit")
+            break;
+
+        send(tracker_sock, cmd.c_str(), cmd.size(), 0);
+
+        memset(buffer, 0, sizeof(buffer));
+        int bytes_received = recv(tracker_sock, buffer, sizeof(buffer), 0);
+        if (bytes_received > 0)
+            cout << "[Tracker Response]: " << buffer << endl;
+        else
+            cout << "[Error] No response from tracker.\n";
+    }
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 3) {
         cerr << "Usage: ./client <client_ip:port> tracker_info.txt" << endl;
@@ -188,28 +217,23 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    string msg = "Hello from client!";
-    send(tracker_sock, msg.c_str(), msg.size(), 0);
+    handleTrackerCommands(tracker_sock);
 
-    char buffer[1024] = {0};
-    int bytes_received = recv(tracker_sock, buffer, sizeof(buffer), 0);
-    if (bytes_received > 0)
-        cout << "[Client] Received: " << buffer << endl;
-
+    //  Simulating parallel chunk downloads using thread pool
     cout << "\n[Client] Starting simulated parallel downloads..." << endl;
 
-    ThreadPool pool(4); 
+    ThreadPool pool(4); // 4 worker threads
     for (int i = 1; i <= 8; i++) {
         pool.enqueue([i] {
-            this_thread::sleep_for(chrono::milliseconds(500 + rand() % 500));
+            this_thread::sleep_for(chrono::milliseconds(300 + rand() % 400));
             lock_guard<mutex> lock(downloadMutex);
             cout << "[Download] Chunk " << i << " downloaded by thread "
                  << this_thread::get_id() << endl;
         });
     }
 
-    this_thread::sleep_for(chrono::seconds(5));
-    cout << "[Client] All chunk downloads finished.\n";
+    this_thread::sleep_for(chrono::seconds(4));
+    cout << "[Client] All simulated downloads finished.\n";
 
     close(tracker_sock);
     return 0;
