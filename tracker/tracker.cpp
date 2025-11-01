@@ -43,6 +43,7 @@ public:
     string owner_user_id;
     unordered_map<string, int> pending_users;
     unordered_map<string, int> accepted_users;
+    unordered_map<string, fileInfo> files; 
 };
 
 unordered_map<string, Group> groups;
@@ -61,6 +62,24 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
     if (args.empty()) return "Invalid command";
 
     string cmd = args[0];
+
+    string current_user_id = "";
+    for (auto &u : users) {
+        if (u.second.ip_address == client_ip && u.second.port == client_port) {
+            current_user_id = u.first;
+            break;
+        }
+    }
+
+    unordered_set<string> login_required = {
+        "create_group", "join_group", "leave_group",
+        "list_groups", "list_files", "accept_request", "logout"
+    };
+
+    if (login_required.count(cmd)) {
+        if (current_user_id.empty()) return "You must login first";
+        if (!users[current_user_id].is_active) return "You must login first";
+    }
 
     if (cmd == "create_user") {
         if (args.size() < 3) return "Usage: create_user <user_id> <password>";
@@ -90,8 +109,8 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
         if (groups.count(group_id)) return "Group already exists";
         Group g;
         g.group_id = group_id;
-        g.owner_user_id = client_ip + ":" + client_port;
-        g.accepted_users[g.owner_user_id] = 1;
+        g.owner_user_id = current_user_id;
+        g.accepted_users[current_user_id] = 1;
         groups[group_id] = g;
         return "Group created successfully";
     }
@@ -100,7 +119,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
         if (args.size() < 2) return "Usage: join_group <group_id>";
         string group_id = args[1];
         if (!groups.count(group_id)) return "Group not found";
-        string uid = client_ip + ":" + client_port;
+        string uid = current_user_id;
         if (groups[group_id].accepted_users.count(uid)) return "Already a member";
         groups[group_id].pending_users[uid] = 1;
         return "Join request sent to admin";
@@ -109,7 +128,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
     else if (cmd == "leave_group") {
         if (args.size() < 2) return "Usage: leave_group <group_id>";
         string group_id = args[1];
-        string uid = client_ip + ":" + client_port;
+        string uid = current_user_id;
         if (!groups.count(group_id)) return "Group not found";
         if (!groups[group_id].accepted_users.count(uid)) return "You are not a member";
         groups[group_id].accepted_users.erase(uid);
@@ -121,6 +140,63 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
         string res;
         for (auto &it : groups) res += it.first + "\n";
         return res;
+    }
+
+    else if (cmd == "list_files") {
+        if (args.size() < 2) return "Usage: list_files <group_id>";
+        string group_id = args[1];
+        if (!groups.count(group_id)) return "Group not found";
+        if (groups[group_id].files.empty()) return "No files in group";
+        string res;
+        for (auto &f : groups[group_id].files) res += f.first + "\n";
+        return res;
+    }
+
+    else if (cmd == "list_requests") {
+    if (args.size() < 2) return "Usage: list_requests <group_id>";
+    string group_id = args[1];
+
+    if (!groups.count(group_id)) return "Group not found";
+
+    if (groups[group_id].owner_user_id != current_user_id)
+        return "Only group owner can view pending requests";
+
+    if (groups[group_id].pending_users.empty()) return "No pending requests";
+
+    string res;
+    for (auto &p : groups[group_id].pending_users) {
+        res += p.first + "\n";  
+    }
+
+    return res;
+}
+
+   else if (cmd == "accept_request") {
+        if (args.size() < 3) return "Usage: accept_request <group_id> <username>";
+        string group_id = args[1];
+        string username = args[2];
+
+        if (!groups.count(group_id)) return "Group not found";
+
+        if (groups[group_id].owner_user_id != current_user_id)
+            return "Only group owner can accept requests";
+
+        if (groups[group_id].pending_users.count(username) == 0) {
+            return "No pending request from this user";
+        }
+
+        groups[group_id].pending_users.erase(username);
+        groups[group_id].accepted_users[username] = 1;
+
+        return "User added to group successfully";
+    }
+
+
+    else if (cmd == "logout") {
+        string user_id = current_user_id;
+        if (!users[user_id].is_active) return "User is not logged in";
+        users[user_id].is_active = false;
+        return "Logout successful";
     }
 
     return "Unknown command";

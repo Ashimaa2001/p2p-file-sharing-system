@@ -176,6 +176,10 @@ void handleTrackerCommands(int tracker_sock) {
     cout << "4. join_group <group_id>\n";
     cout << "5. leave_group <group_id>\n";
     cout << "6. list_groups\n";
+    cout << "7. list_files <group_id>\n";
+    cout << "8. list_requests <group_id>\n";
+    cout << "9. accept_request <group_id> <user_id>\n";
+    cout << "10. logout <user_id>\n";
     cout << "Type 'exit' to quit.\n\n";
 
     string cmd;
@@ -220,20 +224,20 @@ int main(int argc, char *argv[]) {
     handleTrackerCommands(tracker_sock);
 
     //  Simulating parallel chunk downloads using thread pool
-    cout << "\n[Client] Starting simulated parallel downloads..." << endl;
+    // cout << "\n[Client] Starting simulated parallel downloads..." << endl;
 
-    ThreadPool pool(4); // 4 worker threads
-    for (int i = 1; i <= 8; i++) {
-        pool.enqueue([i] {
-            this_thread::sleep_for(chrono::milliseconds(300 + rand() % 400));
-            lock_guard<mutex> lock(downloadMutex);
-            cout << "[Download] Chunk " << i << " downloaded by thread "
-                 << this_thread::get_id() << endl;
-        });
-    }
+    // ThreadPool pool(4); // 4 worker threads
+    // for (int i = 1; i <= 8; i++) {
+    //     pool.enqueue([i] {
+    //         this_thread::sleep_for(chrono::milliseconds(300 + rand() % 400));
+    //         lock_guard<mutex> lock(downloadMutex);
+    //         cout << "[Download] Chunk " << i << " downloaded by thread "
+    //              << this_thread::get_id() << endl;
+    //     });
+    // }
 
-    this_thread::sleep_for(chrono::seconds(4));
-    cout << "[Client] All simulated downloads finished.\n";
+    // this_thread::sleep_for(chrono::seconds(4));
+    // cout << "[Client] All simulated downloads finished.\n";
 
     close(tracker_sock);
     return 0;
