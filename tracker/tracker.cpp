@@ -56,7 +56,6 @@ vector<string> tokenize(const string &s) {
         tokens.push_back(temp);
     return tokens;
 }
-
 string handleCommand(const string &cmdline, const string &client_ip, const string &client_port) {
     vector<string> args = tokenize(cmdline);
     if (args.empty()) return "Invalid command";
@@ -199,7 +198,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
         string file_name = args[3];
         string sha = args[4];
         long long int no_of_chunks = stoll(args[5]); 
-        long long int file_size = stoll(args[6]);   
+        long long int file_size = stoll(args[6]);
 
         string current_user_id = "";
         for (auto &u : users) {

@@ -4,6 +4,11 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <openssl/sha.h>
+#include <sstream>
+#include <iomanip>
+
+#include "file_hasher.h"
 using namespace std;
 
 class FilesStructure {
@@ -203,25 +208,36 @@ void handleTrackerCommands(int tracker_sock) {
                 continue;
             }
 
-            // 1. Calculate file metadata: file name, SHA, number of chunks, file size
-            string file_name = file_path.substr(file_path.find_last_of("/") + 1); 
+            string file_name = file_path.substr(file_path.find_last_of("/") + 1);
             long long int file_size = 0;
-            string sha = "exampleSHA";  // TODO: calculate using a hashing function
             long long int no_of_chunks = 0;
+            string final_sha = "";
 
-            // Example: Get file size
             ifstream file(file_path, ios::binary | ios::ate);
             if (file.is_open()) {
                 file_size = file.tellg();
-                no_of_chunks = (file_size / 1024) + (file_size % 1024 != 0);  // Assuming 1KB chunks
+                no_of_chunks = (file_size / 1024) + (file_size % 1024 != 0);  
+                 
+                FileHasher hasher(file_path);
+
+                hasher.calculateHashValues();
+
+                vector<string> chunk_shas = hasher.getChunkHashes();
+                string complete_file_sha = hasher.getCompleteFileHash();
+
+                string concatenated_sha = complete_file_sha;
+                for (const string& chunk_sha : chunk_shas) {
+                    concatenated_sha += "#" + chunk_sha;
+                }
+
+                final_sha = concatenated_sha; 
+
             }
             file.close();
-
-            // 2. Prepare the full command with metadata
+ 
             string full_cmd = "upload_file " + file_path + " " + group_id + " " 
-                              + file_name + " " + sha + " " + to_string(no_of_chunks) + " " + to_string(file_size);
+                              + file_name + " " + final_sha + " " + to_string(no_of_chunks) + " " + to_string(file_size);
 
-            // 3. Send the command to the tracker
             send(tracker_sock, full_cmd.c_str(), full_cmd.size(), 0);
 
             memset(buffer, 0, sizeof(buffer));
