@@ -57,6 +57,7 @@ vector<string> tokenize(const string &s) {
     return tokens;
 }
 string handleCommand(const string &cmdline, const string &client_ip, const string &client_port) {
+    // Parses a command string and updates tracker state
     vector<string> args = tokenize(cmdline);
     if (args.empty()) return "Invalid command";
 
@@ -240,6 +241,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
 }
 
 void *handleClient(void *socket_desc) {
+    // Per-connection handler (receives commands and responds)
     int client_sock = *(int *)socket_desc;
     delete (int *)socket_desc;
 
@@ -266,6 +268,7 @@ void *handleClient(void *socket_desc) {
 }
 
 int main(int argc, char *argv[]) {
+    // Starts tracker server and accepts client connections
     if (argc < 3) {
         cerr << "Usage: ./tracker tracker_info.txt tracker_no" << endl;
         return -1;

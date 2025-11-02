@@ -8,6 +8,7 @@
 
 using namespace std;
 
+// Compute SHA256 per 1024-byte chunk and the overall file hash
 class FileHasher {
 public:
     string filePath; 
@@ -22,7 +23,7 @@ public:
             return;
         }
 
-        size_t chunkSize = 1024;  
+        size_t chunkSize = 1024;  // chunk size in bytes
         vector<unsigned char> chunkBuffer(chunkSize);
         unsigned char hashValue[EVP_MAX_MD_SIZE];  
         unsigned int hashLength;  
@@ -51,6 +52,7 @@ public:
                 return;
             }
 
+            // finalize chunk hash
             if (EVP_DigestFinal_ex(mdContext, hashValue, &hashLength) != 1) {
                 cerr << "Error finalizing SHA256 for chunk" << endl;
                 EVP_MD_CTX_free(mdContext);
