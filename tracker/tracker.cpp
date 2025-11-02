@@ -47,6 +47,8 @@ public:
 };
 
 unordered_map<string, Group> groups;
+unordered_map<string, string> session_map; 
+
 
 vector<string> tokenize(const string &s) {
     vector<string> tokens;
@@ -56,50 +58,57 @@ vector<string> tokenize(const string &s) {
         tokens.push_back(temp);
     return tokens;
 }
+
 string handleCommand(const string &cmdline, const string &client_ip, const string &client_port) {
-    // Parses a command string and updates tracker state
     vector<string> args = tokenize(cmdline);
     if (args.empty()) return "Invalid command";
 
     string cmd = args[0];
 
+    // Construct unique session key based on client IP and port
+    string client_key = client_ip + ":" + client_port;
+
+    // Retrieve current user based on the session (ip:port)
     string current_user_id = "";
-    for (auto &u : users) {
-        if (u.second.ip_address == client_ip && u.second.port == client_port) {
-            current_user_id = u.first;
-            break;
-        }
+    if (session_map.count(client_key)) {
+        current_user_id = session_map[client_key];
     }
 
+    // Commands that require login
     unordered_set<string> login_required = {
         "create_group", "join_group", "leave_group",
         "list_groups", "list_files", "accept_request", "logout"
     };
 
     if (login_required.count(cmd)) {
-        if (current_user_id.empty()) return "You must login first";
-        if (!users[current_user_id].is_active) return "You must login first";
+        if (current_user_id.empty()) return "You must login first";  
+        if (!users[current_user_id].is_active) return "You must login first"; 
     }
 
     if (cmd == "create_user") {
-        if (args.size() < 3) return "Usage: create_user <user_id> <password>";
+        if (args.size() < 5) return "Usage: create_user <user_id> <password> <ip> <port>";
         string user_id = args[1], password = args[2];
+        string listening_ip = args[3], listening_port = args[4];
         if (users.count(user_id)) return "User already exists";
         User u;
         u.user_id = user_id;
         u.password = password;
-        u.ip_address = client_ip;
-        u.port = client_port;
+        u.ip_address = listening_ip;
+        u.port = listening_port;
         users[user_id] = u;
         return "User created successfully";
     }
 
     else if (cmd == "login") {
-        if (args.size() < 3) return "Usage: login <user_id> <password>";
+        if (args.size() < 5) return "Usage: login <user_id> <password> <ip> <port>";
         string user_id = args[1], password = args[2];
+        string listening_ip = args[3], listening_port = args[4];
         if (!users.count(user_id)) return "User not found";
         if (users[user_id].password != password) return "Invalid password";
         users[user_id].is_active = true;
+        users[user_id].ip_address = listening_ip;  
+        users[user_id].port = listening_port;   
+        session_map[client_key] = user_id;  
         return "Login successful";
     }
 
@@ -158,6 +167,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
 
         if (!groups.count(group_id)) return "Group not found";
 
+        // Only group owner can view pending requests
         if (groups[group_id].owner_user_id != current_user_id)
             return "Only group owner can view pending requests";
 
@@ -171,20 +181,23 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
         return res;
     }
 
-   else if (cmd == "accept_request") {
+    else if (cmd == "accept_request") {
         if (args.size() < 3) return "Usage: accept_request <group_id> <username>";
         string group_id = args[1];
         string username = args[2];
 
         if (!groups.count(group_id)) return "Group not found";
 
+        // Only group owner can accept requests
         if (groups[group_id].owner_user_id != current_user_id)
             return "Only group owner can accept requests";
 
+        // Check if the username exists in pending requests
         if (groups[group_id].pending_users.count(username) == 0) {
             return "No pending request from this user";
         }
 
+        // Move user from pending to accepted
         groups[group_id].pending_users.erase(username);
         groups[group_id].accepted_users[username] = 1;
 
@@ -201,16 +214,9 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
         long long int no_of_chunks = stoll(args[5]); 
         long long int file_size = stoll(args[6]);
 
-        string current_user_id = "";
-        for (auto &u : users) {
-            if (u.second.ip_address == client_ip && u.second.port == client_port) {
-                current_user_id = u.first;
-                break;
-            }
-        }
-
         if (!groups.count(group_id)) return "Group not found";
 
+        // Check if the user is logged in and part of the group
         if (current_user_id.empty()) return "You must login first";
         if (groups[group_id].accepted_users.count(current_user_id) == 0) {
             return "User must be a member of the group to upload a file.";
@@ -218,6 +224,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
 
         users[current_user_id].files[{group_id, file_name}] = sha;
 
+        // Store the file in the group's data structure
         fileInfo f;
         f.file_name = file_name;
         f.sha = sha;
@@ -225,15 +232,54 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
         f.size = file_size;
         groups[group_id].files[file_name] = f;
 
+        // Return success message
         return "File uploaded successfully.";
     }
 
+    else if (cmd == "download_file") {
+        if (args.size() < 3) return "Usage: download_file <group_id> <file_name>";
+        
+        string group_id = args[1];
+        string file_name = args[2];
 
+        // Validation checks
+        if (!groups.count(group_id)) return "Group not found";
+        if (current_user_id.empty()) return "You must login first";
+        if (!groups[group_id].accepted_users.count(current_user_id)) {
+            return "You must be a member of the group to download files";
+        }
+        if (!groups[group_id].files.count(file_name)) {
+            return "File not found in the group";
+        }
+
+        // Get file metadata
+        fileInfo &file = groups[group_id].files[file_name];
+        
+        // Find peers who have this file and use their stored listening ports
+        vector<pair<string, string>> peers; // vector of {ip, port}
+        for (const auto &user : users) {
+            if (user.second.is_active && user.second.files.count({group_id, file_name})) {
+                peers.push_back({user.second.ip_address, user.second.port});
+            }
+        }
+
+        if (peers.empty()) return "No active peers have this file";
+
+        // Format response: file_sha#no_of_chunks#total_size#peer1_ip:peer1_port#peer2_ip:peer2_port...
+        stringstream ss;
+        ss << file.sha << "#" << file.no_of_chunks << "#" << file.size;
+        for (const auto &peer : peers) {
+            ss << "#" << peer.first << ":" << peer.second;
+        }
+
+        return ss.str();
+    }
 
     else if (cmd == "logout") {
-        string user_id = current_user_id;
-        if (!users[user_id].is_active) return "User is not logged in";
-        users[user_id].is_active = false;
+        if (current_user_id.empty() || !users[current_user_id].is_active) return "User is not logged in";
+        
+        users[current_user_id].is_active = false;
+        session_map.erase(client_key);  // Clear the session
         return "Logout successful";
     }
 
@@ -241,7 +287,6 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
 }
 
 void *handleClient(void *socket_desc) {
-    // Per-connection handler (receives commands and responds)
     int client_sock = *(int *)socket_desc;
     delete (int *)socket_desc;
 
@@ -268,7 +313,6 @@ void *handleClient(void *socket_desc) {
 }
 
 int main(int argc, char *argv[]) {
-    // Starts tracker server and accepts client connections
     if (argc < 3) {
         cerr << "Usage: ./tracker tracker_info.txt tracker_no" << endl;
         return -1;
