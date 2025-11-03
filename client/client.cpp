@@ -78,10 +78,11 @@ void *peerServer(void *arg) {
         string request(buffer, bytes_recv);
         cout << "[Peer Server] Received raw request (" << bytes_recv << " bytes): '" << request << "'" << endl;
 
-        cout << "[Peer Server] Request characters:" << endl;
-        for (int i = 0; i < bytes_recv; i++) {
-            cout << "  " << i << ": '" << buffer[i] << "' (ASCII: " << (int)(unsigned char)buffer[i] << ")" << endl;
-        }
+        // Debug print each character and its ASCII value
+        // cout << "[Peer Server] Request characters:" << endl;
+        // for (int i = 0; i < bytes_recv; i++) {
+        //     cout << "  " << i << ": '" << buffer[i] << "' (ASCII: " << (int)(unsigned char)buffer[i] << ")" << endl;
+        // }
 
         vector<string> args = tokenize(request);
         cout << "[Peer Server] Parsed " << args.size() << " arguments:" << endl;
@@ -117,8 +118,9 @@ void *peerServer(void *arg) {
             string group_id = args[1];
             string file_name = args[2];
 
-            cout << "[Peer Server] Looking for file " << file_name << " in files I have" << endl;
+            cout << "[Peer Server] Looking for file '" << file_name << "' in files I have" << endl;
 
+            // Check if we have this file
             if (filesIHave.find(file_name) == filesIHave.end()) {
                 cout << "[Peer Server] File " << file_name << " not found in filesIHave" << endl;
                 cout << "[Peer Server] Available files: ";
@@ -133,18 +135,20 @@ void *peerServer(void *arg) {
                 continue;
             }
 
+            // Format response: <total_chunks>#<chunk1,chunk2,...>
             FilesStructure &file = filesIHave[file_name];
             stringstream ss;
+            
             ss << file.total_chunks << "#";
             
-            vector<int> chunk_numbers;
-            for (size_t i = 0; i < file.chunks_I_have.size(); i++) {
-                chunk_numbers.push_back(i);
-            }
-            
-            for (size_t i = 0; i < chunk_numbers.size(); i++) {
-                if (i > 0) ss << ",";
-                ss << chunk_numbers[i];
+            // Add the chunks we actually have
+            bool first = true;
+            for (int i = 0; i < file.total_chunks; i++) {
+                if (i < file.no_of_chunks_I_have) {
+                    if (!first) ss << ",";
+                    ss << i;
+                    first = false;
+                }
             }
 
             string response = ss.str();
@@ -350,10 +354,16 @@ void handleTrackerCommands(int tracker_sock) {
                 vector<string> chunk_shas = hasher.getChunkHashes();
                 string complete_file_sha = hasher.getCompleteFileHash();
 
-                string concatenated_sha = complete_file_sha;
-                for (const string& chunk_sha : chunk_shas) {
-                    concatenated_sha += "#" + chunk_sha;
+                // Concatenate the chunk hashes to form the final SHA string
+                string concatenated_sha = "";
+                for (size_t i = 0; i < chunk_shas.size(); ++i) {
+                    if (i > 0) {
+                        concatenated_sha += "#"; 
+                    }
+                    concatenated_sha += chunk_shas[i];
                 }
+
+                cout<<"[Upload] Final SHA string: " << concatenated_sha <<endl;
 
                 final_sha = concatenated_sha;
 
@@ -429,6 +439,7 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+    // Let user run commands interactively with tracker
     handleTrackerCommands(tracker_sock);
 
     //  Simulating parallel chunk downloads using thread pool

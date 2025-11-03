@@ -26,6 +26,7 @@ private:
     string file_name;
     string group_id;
     string complete_file_sha;
+    string dest_path;
     vector<string> chunk_shas;
     long long int total_chunks;
     long long int total_size;
@@ -37,13 +38,15 @@ private:
     ThreadPool& thread_pool;
     int tracker_sock;
 
+    // File writing
     int output_fd;
     mutex file_mutex;
 
 public:
-    FileDownloader(const string& fname, const string& dest_path, const string& gid, ThreadPool& pool, int tracker_socket) 
-        : file_name(fname), group_id(gid), thread_pool(pool), tracker_sock(tracker_socket) {
-       
+    FileDownloader(const string& fname, const string& dest_path, const string& gid, ThreadPool& pool, int tracker_socket)
+        : file_name(fname), group_id(gid), dest_path(dest_path), thread_pool(pool), tracker_sock(tracker_socket) {
+        
+        // Initialize with download request to tracker
         string cmd = "download_file " + group_id + " " + file_name;
         char buffer[4096] = {0};
         string response;
@@ -59,39 +62,60 @@ public:
             response = string(buffer, bytes_received);
         } catch (const runtime_error& e) {
             cout << "Error in tracker communication: " << e.what() << endl;
-            throw; 
+            throw;  // Re-throw to handle in caller
         }
-          
-            vector<string> parts;
-            stringstream ss(response);
-            string temp;
-            while (getline(ss, temp, '#')) {
-                parts.push_back(temp);
-            }
+        
+        // Parse tracker response
+        vector<string> parts;
+        stringstream ss(response);
+        string temp;
+        while (getline(ss, temp, '#')) {
+            parts.push_back(temp);
+        }
+        
+        cout << "Response received by client: " << response << endl;
 
-            if (parts.empty()) {
-                throw runtime_error(string("Empty/invalid response from tracker: '") + response + "'");
-            }
+        // Debug: show raw tracker response when parsing
+        if (parts.empty()) {
+            throw runtime_error("Empty/invalid response from tracker: '" + response + "'");
+        }
 
-        if (parts.size() < 6) { 
-            throw runtime_error(string("Invalid response from tracker (not enough parts): '") + response + "'");
-        }       
-        complete_file_sha = parts[0];  
-        chunk_shas.push_back(parts[1]); 
-            try {
-            total_chunks = stoll(parts[3]); 
+        // Check if we have the necessary parts in the response
+        if (parts.size() < 5) { // Need at least no_of_chunks, file_sha, chunk_shas, total_size, and at least one peer
+            throw runtime_error("Invalid response from tracker (not enough parts): '" + response + "'");
+        }
+
+        // Parse response format: no_of_chunks#file_sha#chunk_shas#total_size#peer_info
+        try {
+            total_chunks = stoll(parts[0]); // First part is the number of chunks
         } catch (const exception& e) {
-            throw runtime_error(string("Failed to parse total_chunks from tracker response ('") + parts[3] + "'): " + e.what() + " -- raw response: '" + response + "'");
+            throw runtime_error("Failed to parse total_chunks from tracker response ('" + parts[0] + "'): " + e.what() + " -- raw response: '" + response + "'");
+        }
+
+        complete_file_sha = parts[1];  // Second part is the complete file SHA
+
+        // Parse chunk SHAs, which are in parts[2] to parts[2 + total_chunks - 1]
+        for (size_t i = 2; i < 2 + total_chunks; i++) {
+            if (i < parts.size()) {
+                chunk_shas.push_back(parts[i]);
+            } else {
+                throw runtime_error("Not enough chunk SHAs in the response");
+            }
+        }
+
+        if (chunk_shas.size() != total_chunks) {
+            throw runtime_error("Number of chunk SHAs does not match total_chunks from tracker response");
         }
 
         try {
-            total_size = stoll(parts[4]); 
+            total_size = stoll(parts[2 + total_chunks]);
         } catch (const exception& e) {
-            throw runtime_error(string("Failed to parse total_size from tracker response ('") + parts[4] + "'): " + e.what() + " -- raw response: '" + response + "'");
+            throw runtime_error("Failed to parse total_size from tracker response ('" + parts[2 + total_chunks] + "'): " + e.what() + " -- raw response: '" + response + "'");
         }
+
         chunk_downloaded.resize(total_chunks, false);
-        
-        for (size_t i = 5; i < parts.size(); i++) {
+
+        for (size_t i = 3 + total_chunks; i < parts.size(); i++) {
             string peer = parts[i];
             size_t colon = peer.find(":");
             if (colon != string::npos) {
@@ -101,7 +125,7 @@ public:
                 peers.push_back({ip, port});
             }
         }
-        
+
         if (peers.empty()) {
             throw runtime_error("No peers available in tracker response: " + response);
         }
@@ -329,7 +353,7 @@ public:
                 cout << "[Download] Writing " << chunk_data.length() << " bytes at offset " << offset << endl;
                 
                 // Open file for each write to avoid seek issues
-                string output_path = "downloads/" + file_name;
+                string output_path = dest_path+ "/" + file_name;
                 int fd = open(output_path.c_str(), O_WRONLY);
                 if (fd == -1) {
                     throw runtime_error("Failed to open file for writing: " + string(strerror(errno)));
@@ -712,4 +736,4 @@ public:
     }
 };
 
-#endif // FILE_DOWNLOADER_H
+#endif

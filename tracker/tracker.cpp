@@ -81,7 +81,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
     };
 
     if (login_required.count(cmd)) {
-        if (current_user_id.empty()) return "You must login first";  
+        if (current_user_id.empty()) return "You must login first"; 
         if (!users[current_user_id].is_active) return "You must login first"; 
     }
 
@@ -267,7 +267,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
 
         // Format response: file_sha#no_of_chunks#total_size#peer1_ip:peer1_port#peer2_ip:peer2_port...
         stringstream ss;
-        ss << file.sha << "#" << file.no_of_chunks << "#" << file.size;
+        ss << file.no_of_chunks<< "#" << file.sha << "#" << file.size;
         for (const auto &peer : peers) {
             ss << "#" << peer.first << ":" << peer.second;
         }
