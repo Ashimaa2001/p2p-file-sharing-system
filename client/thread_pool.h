@@ -31,6 +31,7 @@ public:
                         task = std::move(this->tasks.front());
                         this->tasks.pop();
                     }
+                    std::cout << "[ThreadPool] Processing task" << std::endl;
                     task();
                 }
             });
@@ -38,14 +39,18 @@ public:
     }
 
     template <class F>
-    void enqueue(F f) {
+    std::future<void> enqueue(F f) {
+        auto task = std::make_shared<std::packaged_task<void()>>(std::move(f));  
         {
             std::unique_lock<std::mutex> lock(queue_mutex);
             if (stop)
                 throw std::runtime_error("enqueue on stopped ThreadPool");
-            tasks.emplace(f);
+            tasks.emplace([task]() { (*task)(); });  
         }
+
+        std::future<void> res = task->get_future();
         condition.notify_one();
+        return res;
     }
 
     ~ThreadPool() {

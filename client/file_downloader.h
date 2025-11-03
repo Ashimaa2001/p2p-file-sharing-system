@@ -108,7 +108,7 @@ public:
         }
 
         try {
-            total_size = stoll(parts[2 + total_chunks]);
+            total_size = stoll(parts[2 + total_chunks]); // The part after chunk SHAs is the total_size
         } catch (const exception& e) {
             throw runtime_error("Failed to parse total_size from tracker response ('" + parts[2 + total_chunks] + "'): " + e.what() + " -- raw response: '" + response + "'");
         }
@@ -171,8 +171,11 @@ public:
     void markChunkDownloaded(int chunk_no) {
         lock_guard<mutex> lock(download_mutex);
         chunk_downloaded[chunk_no] = true;
+
+        cout << "[Download] Marking chunk " << chunk_no << " as downloaded." << endl;
         
-        reportProgressToTracker();
+        // Update tracker with all chunks we have
+        // reportProgressToTracker();
     }
 
     void reportProgressToTracker() {
@@ -183,56 +186,56 @@ public:
             }
         }
 
+        cout << "[Download] Downloaded chunks: ";
+        for (const auto& chunk : downloaded_chunks) {
+            cout << chunk << " ";
+        }
+        cout << endl;
+
         stringstream chunks_ss;
         for (size_t i = 0; i < downloaded_chunks.size(); i++) {
             if (i > 0) chunks_ss << ",";
             chunks_ss << downloaded_chunks[i];
         }
 
-        string update_cmd = "update_chunks " + group_id + " " + file_name + " " + chunks_ss.str();
-        char resp[1024] = {0};
-        try {
-            if (send(tracker_sock, update_cmd.c_str(), update_cmd.size(), 0) < 0) {
-                throw runtime_error("Failed to send update to tracker");
-            }
-            
-            if (recv(tracker_sock, resp, sizeof(resp), 0) <= 0) {
-                throw runtime_error("Failed to receive response from tracker");
-            }
-        } catch (const runtime_error& e) {
-            cout << "Error in tracker communication: " << e.what() << endl;
-            return;
-        }
-
         bool download_complete = false;
         try {
+            cout << "[Download] Checking if download is complete..." << endl;
             download_complete = isDownloadComplete();
+            cout << "[Download] Download complete status after reporting: " << download_complete << endl;
         } catch (const exception& e) {
             cout << "Error checking download completion: " << e.what() << endl;
             return;
         }
 
+        cout << "[Download] Download complete: " << download_complete << endl;
+
         if (download_complete && verifyCompleteFile()) {
             // Add file to filesIHave when download is complete
             FilesStructure new_file;
             new_file.file_name = file_name;
-            new_file.file_path = file_name;  
+            new_file.file_path = file_name;  // Using filename as path since we're in working directory
             new_file.sha = complete_file_sha;
             new_file.total_chunks = total_chunks;
             new_file.total_size = total_size;
             new_file.no_of_chunks_I_have = total_chunks;
-            
+
+            // Convert downloaded_chunks to strings
             for (int chunk : downloaded_chunks) {
                 new_file.chunks_I_have.push_back(chunk_shas[chunk]);
             }
 
             filesIHave[file_name] = new_file;
+            cout << "[Download] Download complete. File added to filesIHave: " << file_name << endl;
         }
     }
 
     bool isDownloadComplete() {
+        cout << "[Download] Checking if download is complete..." << endl;
         lock_guard<mutex> lock(download_mutex);
-        return all_of(chunk_downloaded.begin(), chunk_downloaded.end(), [](bool v) { return v; });
+        bool complete = all_of(chunk_downloaded.begin(), chunk_downloaded.end(), [](bool v) { return v; });
+        cout << "[Download] Download complete: " << complete << " (All chunks: " << chunk_downloaded.size() << ")" << endl;
+        return complete;
     }
 
     int selectRarestChunk() {
@@ -247,6 +250,12 @@ public:
             }
         }
 
+        cout << "[Download] Chunk Frequencies: ";
+        for (int i = 0; i < total_chunks; ++i) {
+            cout << chunk_frequency[i] << " ";
+        }
+        cout << endl;
+
         int rarest_chunk = -1;
         int min_frequency = INT_MAX;
 
@@ -257,14 +266,15 @@ public:
             }
         }
 
-        cout << "Selected rarest chunk " << rarest_chunk << " with frequency " << min_frequency << endl;
+        cout << "[Download] Selected rarest chunk: " << rarest_chunk << " with frequency: " << min_frequency << endl;
         return rarest_chunk;
     }
 
     // Find a peer that has a specific chunk
     int selectPeerForChunk(int chunk_no) {
         lock_guard<mutex> lock(download_mutex);
-        
+
+        // Find all peers that have this chunk
         vector<int> available_peers;
         for (int i = 0; i < (int)chunk_availability.size(); i++) {
             const auto& peer_chunks = chunk_availability[i];
@@ -273,19 +283,25 @@ public:
             }
         }
 
-        if (available_peers.empty()) return -1;
+        if (available_peers.empty()) {
+            cout << "[Download] No available peers for chunk " << chunk_no << endl;
+            return -1;
+        }
 
         // Select a random peer from available peers
-        return available_peers[rand() % available_peers.size()];
+        int selected_peer = available_peers[rand() % available_peers.size()];
+        cout << "[Download] Selected peer " << selected_peer << " for chunk " << chunk_no << endl;
+
+        return selected_peer;
     }
 
     // Download a single chunk from a peer
     bool downloadChunkFromPeer(int chunk_no, int peer_idx) {
         auto peer = peers[peer_idx];
         int sock = 0;
-        
+
         cout << "[Download] Requesting chunk " << chunk_no << " from peer " << peer.first << ":" << peer.second << endl;
-        
+
         try {
             struct sockaddr_in serv_addr;
 
@@ -306,30 +322,23 @@ public:
                 throw runtime_error("Connection failed for chunk " + to_string(chunk_no) + " (errno: " + to_string(errno) + ")");
             }
             cout << "[Download] Connected to peer successfully" << endl;
-        } catch (const exception& e) {
-            if (sock > 0) {
+
+            // Request the chunk with delimiter
+            string request = "get_chunk " + group_id + " " + file_name + " " + to_string(chunk_no) + "\r\n";
+            cout << "[Download] Sending request: '" << request << "'" << endl;
+            if (send(sock, request.c_str(), request.length(), 0) < 0) {
                 close(sock);
+                throw runtime_error("Failed to send request to peer");
             }
-            cout << "Error connecting to peer: " << e.what() << endl;
-            return false;
-        }
 
-        // Request the chunk with delimiter
-        string request = "get_chunk " + group_id + " " + file_name + " " + to_string(chunk_no) + "\r\n";
-        cout << "[Download] Sending request: '" << request << "'" << endl;
-        if (send(sock, request.c_str(), request.length(), 0) < 0) {
-            close(sock);
-            throw runtime_error("Failed to send request to peer");
-        }
-
-        try {
-            char buffer[1024];  
+            // Receive response: just the raw chunk data
+            char buffer[1024];  // Buffer for chunk data
             cout << "[Download] Waiting for chunk data..." << endl;
             int bytes_received = recv(sock, buffer, sizeof(buffer), 0);
             if (bytes_received <= 0) {
                 close(sock);
                 throw runtime_error("Failed to receive chunk " + to_string(chunk_no) + 
-                                  " (received " + to_string(bytes_received) + " bytes)");
+                                    " (received " + to_string(bytes_received) + " bytes)");
             }
 
             string chunk_data(buffer, bytes_received);
@@ -340,153 +349,177 @@ public:
             }
             cout << dec << endl;
 
+            // Write the chunk to file with proper locking
             {
                 unique_lock<mutex> lock(file_mutex);
-                
+
                 // Verify chunk size
                 if (chunk_data.length() > 1024) {
                     throw runtime_error("Chunk size too large: " + to_string(chunk_data.length()));
                 }
-                
+
                 // Calculate offset
                 off_t offset = chunk_no * 1024LL;
                 cout << "[Download] Writing " << chunk_data.length() << " bytes at offset " << offset << endl;
-                
+
                 // Open file for each write to avoid seek issues
                 string output_path = dest_path+ "/" + file_name;
                 int fd = open(output_path.c_str(), O_WRONLY);
                 if (fd == -1) {
                     throw runtime_error("Failed to open file for writing: " + string(strerror(errno)));
                 }
-                
+
                 // Seek and write
                 if (lseek(fd, offset, SEEK_SET) == -1) {
                     close(fd);
                     throw runtime_error("Failed to seek: " + string(strerror(errno)));
                 }
-                
+
                 ssize_t written = write(fd, chunk_data.c_str(), chunk_data.length());
                 if (written == -1) {
                     close(fd);
                     throw runtime_error("Failed to write: " + string(strerror(errno)));
                 }
-                
+
                 fsync(fd); // Ensure chunk is written
                 close(fd);
-                
+
                 cout << "[Download] Successfully wrote chunk " << chunk_no << " (" << written << " bytes)" << endl;
-                
+
                 // Mark chunk as downloaded only if write was successful
                 markChunkDownloaded(chunk_no);
             }
-            
-            markChunkDownloaded(chunk_no);
-
-            // Notify tracker about the new chunk
-            string update_cmd = "update_chunks " + group_id + " " + file_name + " " + to_string(chunk_no);
-            send(tracker_sock, update_cmd.c_str(), update_cmd.size(), 0);
-            
-            char resp[1024] = {0};
-            recv(tracker_sock, resp, sizeof(resp), 0);
 
             return true;
-        }
-        catch (const exception& e) {
+        } catch (const exception& e) {
             cout << "Error processing chunk " << chunk_no << ": " << e.what() << endl;
             return false;
         }
     }
 
+
     // Start parallel download using thread pool
     void startDownload() {
-        cout << "\nStarting download of file: " << file_name << endl;
-        cout << "Number of peers available: " << getNumPeers() << endl;
-        
-        bool any_peer_responded = false;
+        cout << "\n[Download] Starting download of file: " << file_name << endl;
+        cout << "[Download] Number of peers available: " << getNumPeers() << endl;
+
+        // Create a thread pool to query peers concurrently
+        ThreadPool peer_query_pool(10); 
+        vector<std::future<void>> peer_query_futures;
+
         for (int i = 0; i < getNumPeers(); i++) {
-            cout << "Querying peer " << i << " at " << peers[i].first << ":" << peers[i].second << endl;
-            try {
-                queryPeerChunks(i); 
-                any_peer_responded = true;
-                break; 
-            } catch (const exception& e) {
-                cout << "Warning: Failed to query peer " << i << ": " << e.what() << endl;
-                continue;
-            }
-        }
-        
-        if (!any_peer_responded) {
-            throw runtime_error("Failed to connect to any peers. Please ensure the peers are running and available.");
+            cout << "[Download] Queuing peer query for peer " << i << " at " << peers[i].first << ":" << peers[i].second << endl;
+
+            // Enqueue peer query task to thread pool
+            peer_query_futures.push_back(peer_query_pool.enqueue([i, this] {
+                try {
+                    cout << "[Download] Querying peer " << i << " for chunk info..." << endl;
+                    queryPeerChunks(i); // Query chunk info from the peer
+                    cout << "[Download] Peer " << i << " chunk query successful." << endl;
+                } catch (const exception& e) {
+                    cout << "[Download] Error querying peer " << i << ": " << e.what() << endl;
+                }
+            }));
         }
 
-        cout << "Waiting for initial chunk information..." << endl;
+        // Wait for all peer queries to finish (by calling .get() on each future)
+        for (auto& future : peer_query_futures) {
+            future.get();
+        }
+
+        cout << "[Download] Waiting for initial chunk information..." << endl;
+        // Wait a bit for chunk availability information
         this_thread::sleep_for(chrono::milliseconds(500));
 
-        cout << "Attempting to show initial distribution..." << endl;
+        // Display initial chunk distribution
+        cout << "[Download] Attempting to show initial chunk distribution..." << endl;
         try {
             displayChunkDistribution();
         } catch (const exception& e) {
-            cout << "Error displaying chunk distribution: " << e.what() << endl;
+            cout << "[Download] Error displaying chunk distribution: " << e.what() << endl;
         }
 
-            cout << "Beginning download loop..." << endl;
-            auto last_display = chrono::steady_clock::now();
+        // Create a thread pool for downloading chunks concurrently
+        ThreadPool download_pool(15);  // 15 threads for downloading chunks concurrently
+
+        // Track download attempts and completion status
+        vector<atomic<int>> download_attempts(total_chunks);
+        vector<atomic<bool>> chunk_in_progress(total_chunks);
+        const int MAX_ATTEMPTS = 3;
+
+        auto last_display = chrono::steady_clock::now();
+
+        // Start downloading chunks
+        cout << "[Download] Beginning download loop..." << endl;
+        while (!isDownloadComplete()) {
+            cout << "[Download] Checking for rarest chunk to download..." << endl;
+            int chunk_no = selectRarestChunk();
             
-            vector<atomic<int>> download_attempts(total_chunks);
-            vector<atomic<bool>> chunk_in_progress(total_chunks);
-            const int MAX_ATTEMPTS = 3;
-            
-            while (!isDownloadComplete()) {
-                int chunk_no = selectRarestChunk();
-                if (chunk_no == -1) {
-                    cout << "No chunks available to download" << endl;
-                    break;
-                }
+            // Log the chunk selection
+            cout << "[Download] Rarest chunk selected: " << chunk_no << endl;
 
-                // Check if chunk is already being downloaded
-                bool expected = false;
-                if (!chunk_in_progress[chunk_no].compare_exchange_strong(expected, true)) {
-                    this_thread::sleep_for(chrono::milliseconds(100));
-                    continue;
-                }
+            if (chunk_no == -1) {
+                cout << "[Download] No chunks available to download." << endl;
+                break;
+            }
 
-                if (download_attempts[chunk_no] >= MAX_ATTEMPTS) {
-                    cout << "Failed to download chunk " << chunk_no << " after " << MAX_ATTEMPTS << " attempts" << endl;
-                    break;
-                }
+            // Check if chunk is already being downloaded
+            bool expected = false;
+            if (!chunk_in_progress[chunk_no].compare_exchange_strong(expected, true)) {
+                cout << "[Download] Chunk " << chunk_no << " is already in progress, sleeping..." << endl;
+                this_thread::sleep_for(chrono::milliseconds(100));  // Sleep if the chunk is already being downloaded
+                continue;
+            }
 
-                int peer_idx = selectPeerForChunk(chunk_no);
-                if (peer_idx == -1) {
-                    cout << "No peers available for chunk " << chunk_no << endl;
-                    chunk_in_progress[chunk_no] = false;
-                    this_thread::sleep_for(chrono::milliseconds(100));
-                    continue;
-                }
+            if (download_attempts[chunk_no] >= MAX_ATTEMPTS) {
+                cout << "[Download] Failed to download chunk " << chunk_no << " after " << MAX_ATTEMPTS << " attempts." << endl;
+                break;
+            }
 
-                // Queue the chunk download in thread pool
-                thread_pool.enqueue([this, chunk_no, peer_idx, &download_attempts, &chunk_in_progress] {
-                    try {
-                        download_attempts[chunk_no]++;
-                        if (!downloadChunkFromPeer(chunk_no, peer_idx)) {
-                            cout << "Failed to download chunk " << chunk_no << " from peer " << peer_idx 
-                                 << " (attempt " << download_attempts[chunk_no] << " of " << MAX_ATTEMPTS << ")" << endl;
-                        } else {
-                            cout << "Successfully downloaded chunk " << chunk_no << " from peer " << peer_idx << endl;
-                        }
-                    } catch (const exception& e) {
-                        cout << "Error downloading chunk " << chunk_no << ": " << e.what() << endl;
+            // Select a peer to download the chunk from
+            int peer_idx = selectPeerForChunk(chunk_no);
+            if (peer_idx == -1) {
+                cout << "[Download] No peers available for chunk " << chunk_no << endl;
+                chunk_in_progress[chunk_no] = false;
+                this_thread::sleep_for(chrono::milliseconds(100));  // Sleep before retrying
+                continue;
+            }
+
+            // Log the peer selection
+            cout << "[Download] Enqueuing download task for chunk " << chunk_no << " from peer " << peer_idx << endl;
+
+            // Queue the chunk download task in thread pool
+            download_pool.enqueue([this, chunk_no, peer_idx, &download_attempts, &chunk_in_progress] {
+                try {
+                    download_attempts[chunk_no]++;
+                    cout << "[Download] Attempting to download chunk " << chunk_no << " from peer " << peer_idx 
+                        << " (Attempt " << download_attempts[chunk_no] << " of " << MAX_ATTEMPTS << ")" << endl;
+
+                    if (!downloadChunkFromPeer(chunk_no, peer_idx)) {
+                        cout << "[Download] Failed to download chunk " << chunk_no << " from peer " << peer_idx 
+                            << " (attempt " << download_attempts[chunk_no] << " of " << MAX_ATTEMPTS << ")" << endl;
+                    } else {
+                        cout << "[Download] Successfully downloaded chunk " << chunk_no << " from peer " << peer_idx << endl;
                     }
-                    chunk_in_progress[chunk_no] = false;  // Mark chunk as no longer in progress
-                });
+                    
+                    cout << "[Download] Chunk " << chunk_no << " download attempts: " << download_attempts[chunk_no] << endl;
+                } catch (const exception& e) {
+                    cout << "[Download] Error downloading chunk " << chunk_no << ": " << e.what() << endl;
+                }
+                chunk_in_progress[chunk_no] = false;  // Mark chunk as no longer in progress
+            });
 
-                // Wait a bit before queuing next chunk
-                this_thread::sleep_for(chrono::milliseconds(100));            // Display chunk distribution every 2 seconds
+            this_thread::sleep_for(chrono::milliseconds(100));
+
             auto now = chrono::steady_clock::now();
             if (chrono::duration_cast<chrono::seconds>(now - last_display).count() >= 2) {
+                cout << "[Download] Displaying chunk distribution..." << endl;
                 displayChunkDistribution();
                 last_display = now;
             }
         }
+
+        cout << "[Download] All downloads completed." << endl;
     }
 
     void queryPeerChunks(int peer_idx) {
@@ -576,6 +609,7 @@ public:
             while (getline(chunk_ss, chunk_str, ',')) {
                 if (!chunk_str.empty()) {
                     available_chunks.push_back(stoi(chunk_str));
+                    cout<< "Peer " << peer_idx << " has chunk " << chunk_str << endl;
                 }
             }
         }

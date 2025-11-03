@@ -205,7 +205,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
     }
 
     else if (cmd == "upload_file") {
-        if (args.size() < 6) return "Usage: upload_file <file_path> <group_id> <file_name> <sha> <no_of_chunks> <file_size>";
+        if (args.size() < 6) return "Usage: upload_file <file_path> <group_id> <file_name>";
 
         string file_path = args[1];
         string group_id = args[2];

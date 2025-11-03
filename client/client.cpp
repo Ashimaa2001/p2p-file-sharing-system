@@ -22,6 +22,7 @@ unordered_map<string, pair<string, string>> downloadPending;
 vector<pair<string, string>> downloadComplete;
 
 mutex downloadMutex;
+
 void *peerServer(void *arg) {
     string client_info = *(string *)arg;
     delete (string *)arg;
@@ -374,11 +375,15 @@ void handleTrackerCommands(int tracker_sock) {
                 new_file.total_chunks = no_of_chunks;
                 new_file.total_size = file_size;
                 new_file.no_of_chunks_I_have = no_of_chunks;
-                new_file.chunks_I_have = chunk_shas;  // Store all chunk hashes
+                new_file.chunks_I_have = chunk_shas;
                 filesIHave[file_name] = new_file;
 
                 cout << "[Upload] Added file " << file_name << " to filesIHave map with " 
-                     << no_of_chunks << " chunks" << endl;
+                    << no_of_chunks << " chunks, chunk indices: ";
+                for (const auto& index : new_file.chunks_I_have) {
+                    cout << index << " ";
+                }
+                cout<<endl;
             }
             file.close();
  
