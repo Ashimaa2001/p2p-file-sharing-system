@@ -96,16 +96,16 @@ public:
             throw runtime_error("Failed to parse total_chunks from tracker response ('" + parts[0] + "'): " + e.what() + " -- raw response: '" + response + "'");
         }
 
-        complete_file_sha = parts[1];  // Second part is the complete file SHA
-
         // Parse chunk SHAs, which are in parts[2] to parts[2 + total_chunks - 1]
-        for (size_t i = 2; i < 2 + total_chunks; i++) {
+        for (size_t i = 1; i < 1 + total_chunks; i++) {
             if (i < parts.size()) {
                 chunk_shas.push_back(parts[i]);
             } else {
                 throw runtime_error("Not enough chunk SHAs in the response");
             }
         }
+
+        complete_file_sha = parts[1 + total_chunks];  // Second part is the complete file SHA
 
         if (chunk_shas.size() != total_chunks) {
             throw runtime_error("Number of chunk SHAs does not match total_chunks from tracker response");
@@ -180,7 +180,6 @@ public:
             try {
                 this_thread::sleep_for(chrono::milliseconds(50));
                 
-                // Format: notify_file_chunk <group_id> <file_name>
                 string cmd = "notify_file_chunk " + group_id + " " + file_name;
                 
                 cout << "[Download] Notifying tracker: " << cmd << endl;
@@ -214,7 +213,7 @@ public:
                     cout << "[Download] Created new entry in filesIHave for " << file_key << endl;
                 }
                 
-                filesIHave[file_key].chunks_I_have.clear(); 
+                filesIHave[file_key].chunks_I_have.clear();  // Clear previous chunks
                 filesIHave[file_key].no_of_chunks_I_have = 0;
                 
                 for (int i = 0; i < total_chunks; i++) {
@@ -364,6 +363,56 @@ public:
                 cout << hex << setw(2) << setfill('0') << (int)(unsigned char)buffer[i] << " ";
             }
             cout << dec << endl;
+
+            // Verify chunk SHA before writing
+            unsigned char hash[EVP_MAX_MD_SIZE];
+            unsigned int hashLength;
+            EVP_MD_CTX* mdContext = EVP_MD_CTX_new();
+            if (mdContext == nullptr) {
+                close(sock);
+                throw runtime_error("Error creating EVP context for chunk " + to_string(chunk_no));
+            }
+
+            const EVP_MD* md = EVP_sha256();
+            if (EVP_DigestInit_ex(mdContext, md, nullptr) != 1) {
+                EVP_MD_CTX_free(mdContext);
+                close(sock);
+                throw runtime_error("Error initializing SHA256 for chunk " + to_string(chunk_no));
+            }
+
+            if (EVP_DigestUpdate(mdContext, chunk_data.c_str(), chunk_data.length()) != 1) {
+                EVP_MD_CTX_free(mdContext);
+                close(sock);
+                throw runtime_error("Error updating SHA256 for chunk " + to_string(chunk_no));
+            }
+
+            if (EVP_DigestFinal_ex(mdContext, hash, &hashLength) != 1) {
+                EVP_MD_CTX_free(mdContext);
+                close(sock);
+                throw runtime_error("Error finalizing SHA256 for chunk " + to_string(chunk_no));
+            }
+
+            EVP_MD_CTX_free(mdContext);
+
+            // Convert hash to string (using the same approach as file_hasher.h)
+            stringstream ss;
+            for (unsigned int i = 0; i < hashLength; i++) {
+                ss << hex << setw(2) << setfill('0') << (int)hash[i];
+            }
+            string calculated_sha = ss.str();
+            string expected_sha = chunk_shas[chunk_no];
+            
+            cout << "[Download] Chunk " << chunk_no << " SHA verification:" << endl;
+            cout << "[Download]   Expected: " << expected_sha << endl;
+            cout << "[Download]   Calculated: " << calculated_sha << endl;
+            
+            if (calculated_sha != expected_sha) {
+                close(sock);
+                cout << "[Download] SHA mismatch for chunk " << chunk_no << "! Retrying with different peer..." << endl;
+                return false;  // Return false to trigger retry with different peer
+            }
+            
+            cout << "[Download] SHA verification successful for chunk " << chunk_no << endl;
 
             // Write the chunk to file with proper locking
             {
