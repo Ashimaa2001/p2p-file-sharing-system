@@ -32,7 +32,7 @@ public:
     string ip_address;
     string port;
     bool is_active = false;
-    unordered_map<pair<string, string>, string, PairHash> files;
+    unordered_set<pair<string, string>, PairHash> files;
 };
 
 unordered_map<string, User> users;
@@ -48,7 +48,6 @@ public:
 
 unordered_map<string, Group> groups;
 unordered_map<string, string> session_map; 
-
 
 vector<string> tokenize(const string &s) {
     vector<string> tokens;
@@ -82,7 +81,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
 
     if (login_required.count(cmd)) {
         if (current_user_id.empty()) return "You must login first"; 
-        if (!users[current_user_id].is_active) return "You must login first"; 
+        if (!users[current_user_id].is_active) return "You must login first";
     }
 
     if (cmd == "create_user") {
@@ -222,7 +221,7 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
             return "User must be a member of the group to upload a file.";
         }
 
-        users[current_user_id].files[{group_id, file_name}] = sha;
+        users[current_user_id].files.insert({group_id, file_name});
 
         // Store the file in the group's data structure
         fileInfo f;
@@ -273,6 +272,26 @@ string handleCommand(const string &cmdline, const string &client_ip, const strin
         }
 
         return ss.str();
+    }
+
+    else if (cmd == "notify_file_chunk") {
+        if (args.size() < 3) return "Usage: notify_file_chunk <group_id> <file_name>";
+        
+        string group_id = args[1];
+        string file_name = args[2];
+
+        if (current_user_id.empty()) return "You must login first";
+        if (!groups.count(group_id)) return "Group not found";
+        if (!groups[group_id].accepted_users.count(current_user_id)) {
+            return "User must be a member of the group";
+        }
+
+        users[current_user_id].files.insert({group_id, file_name});
+
+        cout << "[Tracker] User " << current_user_id << " notified about file " << file_name 
+             << " in group " << group_id << endl;
+
+        return "File chunk notification received successfully";
     }
 
     else if (cmd == "logout") {

@@ -41,10 +41,14 @@ private:
     // File writing
     int output_fd;
     mutex file_mutex;
+    
+    // Track if we've notified the tracker about this file
+    bool tracker_notified;
+    mutex notify_mutex;
 
 public:
     FileDownloader(const string& fname, const string& dest_path, const string& gid, ThreadPool& pool, int tracker_socket)
-        : file_name(fname), group_id(gid), dest_path(dest_path), thread_pool(pool), tracker_sock(tracker_socket) {
+        : file_name(fname), group_id(gid), dest_path(dest_path), thread_pool(pool), tracker_sock(tracker_socket), tracker_notified(false) {
         
         // Initialize with download request to tracker
         string cmd = "download_file " + group_id + " " + file_name;
@@ -163,6 +167,73 @@ public:
         return true;
     }
 
+    void notifyTrackerOfFile() {
+        lock_guard<mutex> lock(notify_mutex);
+        
+        if (tracker_notified) {
+            return;  
+        }
+
+        tracker_notified = true;  
+
+        thread notification_thread([this]() {
+            try {
+                this_thread::sleep_for(chrono::milliseconds(50));
+                
+                // Format: notify_file_chunk <group_id> <file_name>
+                string cmd = "notify_file_chunk " + group_id + " " + file_name;
+                
+                cout << "[Download] Notifying tracker: " << cmd << endl;
+                
+                if (send(tracker_sock, cmd.c_str(), cmd.size(), 0) < 0) {
+                    cout << "[Download] Failed to send notification to tracker" << endl;
+                    return;
+                }
+
+                this_thread::sleep_for(chrono::milliseconds(100));
+                
+                char response_buffer[1024] = {0};
+                int flags = MSG_DONTWAIT;  
+                int bytes_received = recv(tracker_sock, response_buffer, sizeof(response_buffer), flags);
+                if (bytes_received > 0) {
+                    string response(response_buffer, bytes_received);
+                    cout << "[Download] Tracker notification response: " << response << endl;
+                }
+
+                string file_key = file_name;  // Use just file_name as key, matching client.cpp convention
+                
+                // Check if file already exists in filesIHave
+                if (filesIHave.find(file_key) == filesIHave.end()) {
+                    FilesStructure file_struct;
+                    file_struct.file_name = file_name;
+                    file_struct.file_path = dest_path + "/" + file_name;
+                    file_struct.sha = complete_file_sha;
+                    file_struct.total_chunks = total_chunks;
+                    file_struct.total_size = total_size;
+                    filesIHave[file_key] = file_struct;
+                    cout << "[Download] Created new entry in filesIHave for " << file_key << endl;
+                }
+                
+                filesIHave[file_key].chunks_I_have.clear(); 
+                filesIHave[file_key].no_of_chunks_I_have = 0;
+                
+                for (int i = 0; i < total_chunks; i++) {
+                    if (chunk_downloaded[i]) {
+                        filesIHave[file_key].chunks_I_have.push_back(to_string(i));
+                        filesIHave[file_key].no_of_chunks_I_have++;
+                    }
+                }
+                
+                cout << "[Download] Updated filesIHave for " << file_key << " with " << filesIHave[file_key].no_of_chunks_I_have << " chunks" << endl;
+                cout << "[Download] Successfully notified tracker about file " << file_name << endl;
+            } catch (const exception& e) {
+                cout << "[Download] Error notifying tracker: " << e.what() << endl;
+            }
+        });
+        
+        notification_thread.detach(); 
+    }
+
     void updateChunkAvailability(int peer_idx, const vector<int>& chunks) {
         lock_guard<mutex> lock(download_mutex);
         chunk_availability[peer_idx] = chunks;
@@ -173,61 +244,6 @@ public:
         chunk_downloaded[chunk_no] = true;
 
         cout << "[Download] Marking chunk " << chunk_no << " as downloaded." << endl;
-        
-        // Update tracker with all chunks we have
-        // reportProgressToTracker();
-    }
-
-    void reportProgressToTracker() {
-        vector<int> downloaded_chunks;
-        for (int i = 0; i < total_chunks; i++) {
-            if (chunk_downloaded[i]) {
-                downloaded_chunks.push_back(i);
-            }
-        }
-
-        cout << "[Download] Downloaded chunks: ";
-        for (const auto& chunk : downloaded_chunks) {
-            cout << chunk << " ";
-        }
-        cout << endl;
-
-        stringstream chunks_ss;
-        for (size_t i = 0; i < downloaded_chunks.size(); i++) {
-            if (i > 0) chunks_ss << ",";
-            chunks_ss << downloaded_chunks[i];
-        }
-
-        bool download_complete = false;
-        try {
-            cout << "[Download] Checking if download is complete..." << endl;
-            download_complete = isDownloadComplete();
-            cout << "[Download] Download complete status after reporting: " << download_complete << endl;
-        } catch (const exception& e) {
-            cout << "Error checking download completion: " << e.what() << endl;
-            return;
-        }
-
-        cout << "[Download] Download complete: " << download_complete << endl;
-
-        if (download_complete && verifyCompleteFile()) {
-            // Add file to filesIHave when download is complete
-            FilesStructure new_file;
-            new_file.file_name = file_name;
-            new_file.file_path = file_name;  // Using filename as path since we're in working directory
-            new_file.sha = complete_file_sha;
-            new_file.total_chunks = total_chunks;
-            new_file.total_size = total_size;
-            new_file.no_of_chunks_I_have = total_chunks;
-
-            // Convert downloaded_chunks to strings
-            for (int chunk : downloaded_chunks) {
-                new_file.chunks_I_have.push_back(chunk_shas[chunk]);
-            }
-
-            filesIHave[file_name] = new_file;
-            cout << "[Download] Download complete. File added to filesIHave: " << file_name << endl;
-        }
     }
 
     bool isDownloadComplete() {
@@ -388,6 +404,7 @@ public:
 
                 // Mark chunk as downloaded only if write was successful
                 markChunkDownloaded(chunk_no);
+                notifyTrackerOfFile();
             }
 
             return true;
