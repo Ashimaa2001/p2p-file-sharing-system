@@ -164,6 +164,81 @@ public:
     }
 
     bool verifyCompleteFile() {
+        cout << "[Download] Verifying complete file integrity..." << endl;
+        
+        string output_path = dest_path + "/" + file_name;
+        int fd = open(output_path.c_str(), O_RDONLY);
+        if (fd < 0) {
+            cerr << "[Download] Error opening file for verification: " << strerror(errno) << endl;
+            return false;
+        }
+
+        size_t chunkSize = 1024;
+        vector<unsigned char> fileBuffer(chunkSize);
+        unsigned char hash[EVP_MAX_MD_SIZE];
+        unsigned int hashLength;
+
+        EVP_MD_CTX* mdContext = EVP_MD_CTX_new();
+        if (mdContext == nullptr) {
+            cerr << "[Download] Error creating EVP context for file verification" << endl;
+            close(fd);
+            return false;
+        }
+
+        const EVP_MD* md = EVP_sha256();
+        if (EVP_DigestInit_ex(mdContext, md, nullptr) != 1) {
+            cerr << "[Download] Error initializing SHA256 for file verification" << endl;
+            EVP_MD_CTX_free(mdContext);
+            close(fd);
+            return false;
+        }
+
+        ssize_t bytesRead;
+        while ((bytesRead = read(fd, fileBuffer.data(), chunkSize)) > 0) {
+            if (EVP_DigestUpdate(mdContext, fileBuffer.data(), bytesRead) != 1) {
+                cerr << "[Download] Error updating SHA256 with file data" << endl;
+                EVP_MD_CTX_free(mdContext);
+                close(fd);
+                return false;
+            }
+        }
+
+        if (EVP_DigestFinal_ex(mdContext, hash, &hashLength) != 1) {
+            cerr << "[Download] Error finalizing SHA256 for file verification" << endl;
+            EVP_MD_CTX_free(mdContext);
+            close(fd);
+            return false;
+        }
+
+        EVP_MD_CTX_free(mdContext);
+        close(fd);
+
+        // Convert hash to string
+        stringstream ss;
+        for (unsigned int i = 0; i < hashLength; i++) {
+            ss << hex << setw(2) << setfill('0') << (int)hash[i];
+        }
+        string calculated_file_sha = ss.str();
+
+        cout << "[Download] Complete file SHA verification:" << endl;
+        cout << "[Download]   Expected: " << complete_file_sha << endl;
+        cout << "[Download]   Calculated: " << calculated_file_sha << endl;
+
+        if (calculated_file_sha != complete_file_sha) {
+            cout << "[Download] ERROR: Complete file SHA mismatch!" << endl;
+            cout << "[Download] File integrity verification FAILED" << endl;
+            
+            // Delete the corrupted file
+            if (remove(output_path.c_str()) == 0) {
+                cout << "[Download] Deleted corrupted file: " << output_path << endl;
+            } else {
+                cout << "[Download] Failed to delete corrupted file: " << output_path << endl;
+            }
+            
+            return false;
+        }
+
+        cout << "[Download] Complete file SHA verification SUCCESSFUL!" << endl;
         return true;
     }
 
