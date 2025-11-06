@@ -85,9 +85,11 @@ cd client
 ![user registration](diagrams/user_authentication.png)
 
 ### 2. Group Membership Flow
-![user registration](diagrams/group_membership.png)
+![group membership](diagrams/group_membership.png)
 
 ### 3. File Upload Flow
-![user registration](diagrams/file_upload.png)
+![file upload](diagrams/file_upload.png)
 
-
+### 3. File Download Flow
+![file download](diagrams/file_download_1.png)
+![file download](diagrams/file_download_2.png)
