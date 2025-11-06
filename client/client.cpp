@@ -9,12 +9,16 @@
 #include <iomanip>
 #include <sys/stat.h>
 
+#include "config.h"
 #include "thread_pool.h"
 #include "data_structures.h"
 #include "file_downloader.h"
 #include "file_hasher.h"
 
 using namespace std;
+
+// Global config object - loaded from config file at startup
+Config g_config;
 
 unordered_map<string, FilesStructure> filesIHave;
 unordered_map<string, pair<string, string>> downloadStart;
@@ -346,9 +350,10 @@ void handleTrackerCommands(int tracker_sock) {
             ifstream file(file_path, ios::binary | ios::ate);
             if (file.is_open()) {
                 file_size = file.tellg();
-                no_of_chunks = (file_size / 1024) + (file_size % 1024 != 0);  
+                int chunk_size = g_config.getInt("chunk_size");
+                no_of_chunks = (file_size / chunk_size) + (file_size % chunk_size != 0);  
                  
-                FileHasher hasher(file_path);
+                FileHasher hasher(file_path, g_config);
 
                 hasher.calculateHashValues();
 
@@ -420,9 +425,17 @@ void handleTrackerCommands(int tracker_sock) {
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
-        cerr << "Usage: ./client <client_ip:port> tracker_info.txt" << endl;
+        cerr << "Usage: ./client <client_ip:port> tracker_info.txt [config_file]" << endl;
         return -1;
     }
+
+    // Load configuration from file (or use defaults)
+    string config_file = "default.conf";
+    if (argc >= 4) {
+        config_file = argv[3];
+    }
+    g_config.loadFromFile(config_file);
+    g_config.printConfig();
 
     string client_info = argv[1];
     string tracker_info_file = argv[2];

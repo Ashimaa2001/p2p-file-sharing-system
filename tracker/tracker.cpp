@@ -4,7 +4,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <pthread.h>
+
+// Include config header (copy config.h or use relative path)
+#include "../client/config.h"
+
 using namespace std;
+
+// Global config object
+Config g_tracker_config;
 
 class fileInfo {
 public:
@@ -333,9 +340,17 @@ void *handleClient(void *socket_desc) {
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
-        cerr << "Usage: ./tracker tracker_info.txt tracker_no" << endl;
+        cerr << "Usage: ./tracker tracker_info.txt tracker_no [config_file]" << endl;
         return -1;
     }
+
+    // Load configuration from file (or use defaults)
+    string config_file = "default.conf";
+    if (argc >= 4) {
+        config_file = argv[3];
+    }
+    g_tracker_config.loadFromFile(config_file);
+    g_tracker_config.printConfig();
 
     string tracker_info_file = argv[1];
     int tracker_no = stoi(argv[2]);

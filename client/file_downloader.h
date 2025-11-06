@@ -13,6 +13,7 @@
 #include <fcntl.h>
 #include <openssl/evp.h>
 
+#include "config.h"
 #include "thread_pool.h"
 #include "data_structures.h"
 
@@ -20,6 +21,8 @@ using namespace std;
 
 // Global map to track files that this peer has (defined in client.cpp)
 extern unordered_map<string, FilesStructure> filesIHave;
+// Global config object (defined in client.cpp)
+extern Config g_config;
 
 class FileDownloader {
 private:
@@ -173,7 +176,7 @@ public:
             return false;
         }
 
-        size_t chunkSize = 1024;
+        int chunkSize = g_config.getInt("chunk_size");
         vector<unsigned char> fileBuffer(chunkSize);
         unsigned char hash[EVP_MAX_MD_SIZE];
         unsigned int hashLength;
@@ -493,13 +496,14 @@ public:
             {
                 unique_lock<mutex> lock(file_mutex);
 
+                int chunk_size = g_config.getInt("chunk_size");
                 // Verify chunk size
-                if (chunk_data.length() > 1024) {
+                if (chunk_data.length() > (size_t)chunk_size) {
                     throw runtime_error("Chunk size too large: " + to_string(chunk_data.length()));
                 }
 
                 // Calculate offset
-                off_t offset = chunk_no * 1024LL;
+                off_t offset = chunk_no * (long long)chunk_size;
                 cout << "[Download] Writing " << chunk_data.length() << " bytes at offset " << offset << endl;
 
                 // Open file for each write to avoid seek issues
@@ -545,7 +549,8 @@ public:
         cout << "[Download] Number of peers available: " << getNumPeers() << endl;
 
         // Create a thread pool to query peers concurrently
-        ThreadPool peer_query_pool(10); 
+        int peer_threads = g_config.getInt("peer_query_threads");
+        ThreadPool peer_query_pool(peer_threads); 
         vector<std::future<void>> peer_query_futures;
 
         for (int i = 0; i < getNumPeers(); i++) {
@@ -581,12 +586,13 @@ public:
         }
 
         // Create a thread pool for downloading chunks concurrently
-        ThreadPool download_pool(15);  // 15 threads for downloading chunks concurrently
+        int download_threads = g_config.getInt("thread_pool_size");
+        ThreadPool download_pool(download_threads);
 
         // Track download attempts and completion status
         vector<atomic<int>> download_attempts(total_chunks);
         vector<atomic<bool>> chunk_in_progress(total_chunks);
-        const int MAX_ATTEMPTS = 3;
+        int max_attempts = g_config.getInt("max_download_attempts");
 
         auto last_display = chrono::steady_clock::now();
 
@@ -612,8 +618,8 @@ public:
                 continue;
             }
 
-            if (download_attempts[chunk_no] >= MAX_ATTEMPTS) {
-                cout << "[Download] Failed to download chunk " << chunk_no << " after " << MAX_ATTEMPTS << " attempts." << endl;
+            if (download_attempts[chunk_no] >= max_attempts) {
+                cout << "[Download] Failed to download chunk " << chunk_no << " after " << max_attempts << " attempts." << endl;
                 break;
             }
 
@@ -630,15 +636,15 @@ public:
             cout << "[Download] Enqueuing download task for chunk " << chunk_no << " from peer " << peer_idx << endl;
 
             // Queue the chunk download task in thread pool
-            download_pool.enqueue([this, chunk_no, peer_idx, &download_attempts, &chunk_in_progress] {
+            download_pool.enqueue([this, chunk_no, peer_idx, &download_attempts, &chunk_in_progress, max_attempts] {
                 try {
                     download_attempts[chunk_no]++;
                     cout << "[Download] Attempting to download chunk " << chunk_no << " from peer " << peer_idx 
-                        << " (Attempt " << download_attempts[chunk_no] << " of " << MAX_ATTEMPTS << ")" << endl;
+                        << " (Attempt " << download_attempts[chunk_no] << " of " << max_attempts << ")" << endl;
 
                     if (!downloadChunkFromPeer(chunk_no, peer_idx)) {
                         cout << "[Download] Failed to download chunk " << chunk_no << " from peer " << peer_idx 
-                            << " (attempt " << download_attempts[chunk_no] << " of " << MAX_ATTEMPTS << ")" << endl;
+                            << " (attempt " << download_attempts[chunk_no] << " of " << max_attempts << ")" << endl;
                     } else {
                         cout << "[Download] Successfully downloaded chunk " << chunk_no << " from peer " << peer_idx << endl;
                     }

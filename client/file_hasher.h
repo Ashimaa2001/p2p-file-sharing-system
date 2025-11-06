@@ -5,15 +5,21 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include "config.h"
 
 using namespace std;
 
+// FileHasher: computes SHA256 for each chunk and the full file
+// Chunk size is read from config (default: 1024 bytes)
 class FileHasher {
+private:
+    Config& config;
+    
 public:
-    string filePath;
+    string filePath; 
     vector<string> hashValues;
 
-    FileHasher(const string& file) : filePath(file) {}
+    FileHasher(const string& file, Config& cfg) : filePath(file), config(cfg) {}
 
     void calculateHashValues() {
         int fd = open(filePath.c_str(), O_RDONLY);
@@ -22,7 +28,7 @@ public:
             return;
         }
 
-        size_t chunkSize = 1024;  
+        int chunkSize = config.getInt("chunk_size");
         vector<unsigned char> chunkBuffer(chunkSize);
         unsigned char hashValue[EVP_MAX_MD_SIZE];  
         unsigned int hashLength;  
