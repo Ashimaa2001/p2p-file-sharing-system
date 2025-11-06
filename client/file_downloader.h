@@ -277,31 +277,9 @@ public:
                     cout << "[Download] Tracker notification response: " << response << endl;
                 }
 
-                string file_key = file_name;  // Use just file_name as key, matching client.cpp convention
-                
-                // Check if file already exists in filesIHave
-                if (filesIHave.find(file_key) == filesIHave.end()) {
-                    FilesStructure file_struct;
-                    file_struct.file_name = file_name;
-                    file_struct.file_path = dest_path + "/" + file_name;
-                    file_struct.sha = complete_file_sha;
-                    file_struct.total_chunks = total_chunks;
-                    file_struct.total_size = total_size;
-                    filesIHave[file_key] = file_struct;
-                    cout << "[Download] Created new entry in filesIHave for " << file_key << endl;
-                }
-                
-                filesIHave[file_key].chunks_I_have.clear();  // Clear previous chunks
-                filesIHave[file_key].no_of_chunks_I_have = 0;
-                
-                for (int i = 0; i < total_chunks; i++) {
-                    if (chunk_downloaded[i]) {
-                        filesIHave[file_key].chunks_I_have.push_back(to_string(i));
-                        filesIHave[file_key].no_of_chunks_I_have++;
-                    }
-                }
-                
-                cout << "[Download] Updated filesIHave for " << file_key << " with " << filesIHave[file_key].no_of_chunks_I_have << " chunks" << endl;
+                // Update local filesIHave with all currently downloaded chunks
+                updateLocalFilesList();
+
                 cout << "[Download] Successfully notified tracker about file " << file_name << endl;
             } catch (const exception& e) {
                 cout << "[Download] Error notifying tracker: " << e.what() << endl;
@@ -309,6 +287,43 @@ public:
         });
         
         notification_thread.detach(); 
+    }
+
+    // Update filesIHave with current download progress (call this after each chunk)
+    // This version assumes the mutex is already locked by the caller
+    void updateLocalFilesListUnlocked() {
+        string file_key = file_name;
+
+        if (filesIHave.find(file_key) == filesIHave.end()) {
+            FilesStructure file_struct;
+            file_struct.file_name = file_name;
+            file_struct.file_path = dest_path + "/" + file_name;
+            file_struct.sha = complete_file_sha;
+            file_struct.total_chunks = total_chunks;
+            file_struct.total_size = total_size;
+            filesIHave[file_key] = file_struct;
+            cout << "[Download] Created new entry in filesIHave for " << file_key << endl;
+        }
+        
+        filesIHave[file_key].chunks_I_have.clear();
+        filesIHave[file_key].no_of_chunks_I_have = 0;
+        
+        for (int i = 0; i < total_chunks; i++) {
+            if (chunk_downloaded[i]) {
+                filesIHave[file_key].chunks_I_have.push_back(to_string(i));
+                filesIHave[file_key].no_of_chunks_I_have++;
+            }
+        }
+        
+        cout << "[Download] Updated filesIHave for " << file_key << " with " << filesIHave[file_key].no_of_chunks_I_have << " chunks" << endl;
+    }
+
+    // Update filesIHave with current download progress (call this after each chunk)
+    void updateLocalFilesList() {
+        string file_key = file_name;
+        
+        lock_guard<mutex> lock(download_mutex);
+        updateLocalFilesListUnlocked();
     }
 
     void updateChunkAvailability(int peer_idx, const vector<int>& chunks) {
@@ -321,6 +336,9 @@ public:
         chunk_downloaded[chunk_no] = true;
 
         cout << "[Download] Marking chunk " << chunk_no << " as downloaded." << endl;
+        
+        // Update filesIHave immediately after each chunk download (mutex already held)
+        updateLocalFilesListUnlocked();
     }
 
     bool isDownloadComplete() {

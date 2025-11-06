@@ -146,14 +146,12 @@ void *peerServer(void *arg) {
             
             ss << file.total_chunks << "#";
             
-            // Add the chunks we actually have
+            // Add the chunks we actually have (check chunks_I_have vector, not just count)
             bool first = true;
-            for (int i = 0; i < file.total_chunks; i++) {
-                if (i < file.no_of_chunks_I_have) {
-                    if (!first) ss << ",";
-                    ss << i;
-                    first = false;
-                }
+            for (const string& chunk_str : file.chunks_I_have) {
+                if (!first) ss << ",";
+                ss << chunk_str;
+                first = false;
             }
 
             string response = ss.str();
@@ -380,7 +378,11 @@ void handleTrackerCommands(int tracker_sock) {
                 new_file.total_chunks = no_of_chunks;
                 new_file.total_size = file_size;
                 new_file.no_of_chunks_I_have = no_of_chunks;
-                new_file.chunks_I_have = chunk_shas;
+                
+                // Store chunk indices (0, 1, 2, ...), not SHA hashes
+                for (int i = 0; i < no_of_chunks; i++) {
+                    new_file.chunks_I_have.push_back(to_string(i));
+                }
                 filesIHave[file_name] = new_file;
 
                 cout << "[Upload] Added file " << file_name << " to filesIHave map with " 
